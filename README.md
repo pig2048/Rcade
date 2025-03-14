@@ -33,7 +33,7 @@ pip install -r requirements.txt
 
 ### config.json
 
-- 控制代理开关，并发数，时间间隔
+- 控制代理开关，并发数，时间间隔(默认任务是每隔22秒执行)
 
 #### token.txt：包含身份验证令牌，每行一个。
 
