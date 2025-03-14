@@ -1,0 +1,8 @@
+{
+    "use_proxies": true,
+    "max_workers": 5,
+    "task_interval": 22,
+    "retry_attempts": 3,
+    "retry_delay": 5,
+    "debug_mode": false
+}
