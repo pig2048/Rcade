@@ -11,7 +11,7 @@
 
 1. 克隆仓库到本地：
 ```bash
-git clone https://github.com/pig2048/
+git clone https://github.com/pig2048/Rcade.git
 cd Rcade
 ```
 
