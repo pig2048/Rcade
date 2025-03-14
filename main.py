@@ -52,6 +52,30 @@ BANNER = """
 """
 
 
+def get_user_info(user_id, token):
+    url = f"https://lb.backend-sidequest.rcade.game/users/{user_id}"
+    headers = {
+        "authority": "lb.backend-sidequest.rcade.game",
+        "accept": "*/*",
+        "accept-language": "zh-HK,zh;q=0.9,zh-TW;q=0.8",
+        "authorization": f"Bearer {token}",
+        "origin": "https://sidequest.rcade.game",
+        "referer": "https://sidequest.rcade.game/",
+        "sec-ch-ua": "\"Chromium\";v=\"130\", \"Google Chrome\";v=\"130\", \"Not?A_Brand\";v=\"99\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        console.print(f"[bold red]获取用户信息失败: {str(e)} ❌[/bold red]")
+        return None
+
+
 def ensure_files_exist():
     for file in [TOKEN_FILE, ID_FILE, PROXY_FILE]:
         if not os.path.exists(file):
@@ -425,27 +449,3 @@ if __name__ == "__main__":
         console.print(f"[bold red]错误: {str(e)} ❌[/bold red]")
         import traceback
         console.print(traceback.format_exc())
-
-
-def get_user_info(user_id, token):
-    url = f"https://lb.backend-sidequest.rcade.game/users/{user_id}"
-    headers = {
-        "authority": "lb.backend-sidequest.rcade.game",
-        "accept": "*/*",
-        "accept-language": "zh-HK,zh;q=0.9,zh-TW;q=0.8",
-        "authorization": f"Bearer {token}",
-        "origin": "https://sidequest.rcade.game",
-        "referer": "https://sidequest.rcade.game/",
-        "sec-ch-ua": "\"Chromium\";v=\"130\", \"Google Chrome\";v=\"130\", \"Not?A_Brand\";v=\"99\"",
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": "\"Windows\"",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-    }
-    try:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        return None
-    except Exception as e:
-        console.print(f"[bold red]获取用户信息失败: {str(e)} ❌[/bold red]")
-        return None
