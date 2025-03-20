@@ -30,13 +30,7 @@ TOKEN_FILE = "token.txt"
 ID_FILE = "id.txt"
 PROXY_FILE = "proxy.txt"
 CONFIG_FILE = "config.json"
-COMPLETED_TASKS_FILE = "completed_tasks.json"
 
-
-REGULAR_TASKS = [5, 6, 7, 8, 9, 10, 13, 170, 171, 216, 217, 243, 263]
-
-
-LIMITED_TASKS = [327, 328, 329, 330, 331, 332, 333]
 
 
 CHECKIN_TASK = 1
@@ -76,6 +70,39 @@ def get_user_info(user_id, token):
         return None
 
 
+def get_available_tasks(user_id, token):
+    
+    try:
+        user_info = get_user_info(user_id, token)
+        if not user_info:
+            return [], []
+            
+        
+        completed_task_ids = set(user_info.get("user", {}).get("quests", {}).keys())
+        
+    
+        all_available_tasks = user_info.get("availableQuests", [])
+        
+        
+        regular_tasks = []
+        limited_tasks = []
+        
+        for task in all_available_tasks:
+            task_id = task["_id"]
+            
+            if task_id not in completed_task_ids:
+               
+                if task.get("endTS", 0) > 0:
+                    limited_tasks.append(int(task_id))
+                else:
+                    regular_tasks.append(int(task_id))
+        
+        return regular_tasks, limited_tasks
+    except Exception as e:
+        console.print(f"[bold red]获取可用任务失败: {str(e)} ❌[/bold red]")
+        return [], []
+
+
 def ensure_files_exist():
     for file in [TOKEN_FILE, ID_FILE, PROXY_FILE]:
         if not os.path.exists(file):
@@ -87,11 +114,6 @@ def ensure_files_exist():
         with open(CONFIG_FILE, "w") as f:
             json.dump(DEFAULT_CONFIG, f, indent=4)
         console.print(f"[yellow]Created default {CONFIG_FILE}[/yellow]")
-    
-    if not os.path.exists(COMPLETED_TASKS_FILE):
-        with open(COMPLETED_TASKS_FILE, "w") as f:
-            json.dump({}, f, indent=4)
-        console.print(f"[yellow]Created empty {COMPLETED_TASKS_FILE}[/yellow]")
 
 
 def load_config():
@@ -114,23 +136,10 @@ def load_proxies():
         return [line.strip() for line in f if line.strip()]
 
 
-def load_completed_tasks():
-    try:
-        with open(COMPLETED_TASKS_FILE, "r") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        return {}
-
-
-def save_completed_tasks(completed_tasks):
-    with open(COMPLETED_TASKS_FILE, "w") as f:
-        json.dump(completed_tasks, f, indent=4)
-
-
-def get_task_type_name(task_id):
-    if task_id in REGULAR_TASKS:
+def get_task_type_name(task_id, regular_tasks, limited_tasks):
+    if task_id in regular_tasks:
         return "常规任务"
-    elif task_id in LIMITED_TASKS:
+    elif task_id in limited_tasks:
         return "限时任务"
     elif task_id == CHECKIN_TASK:
         return "签到任务"
@@ -138,11 +147,11 @@ def get_task_type_name(task_id):
         return "未知任务"
 
 
-def execute_task(account_index, user_id, token, task_id, proxy=None, debug=False, user_name=None):
+def execute_task(account_index, user_id, token, task_id, regular_tasks, limited_tasks, proxy=None, debug=False, user_name=None):
     if user_name is None:
         user_name = f"账户{account_index+1}"
         
-    task_type = get_task_type_name(task_id)
+    task_type = get_task_type_name(task_id, regular_tasks, limited_tasks)
     url = f"https://lb.backend-sidequest.rcade.game/users/{user_id}/quests/{task_id}"
     
     headers = {
@@ -183,7 +192,7 @@ def execute_task(account_index, user_id, token, task_id, proxy=None, debug=False
                 console.print(f"Debug - Response Code: {response.status_code}, Content: {response.text[:100]}")
             
             if response.status_code == 200:
-                
+                # 获取最新用户信息，包括积分
                 user_info = get_user_info(user_id, token)
                 points = user_info["user"]["points"] if user_info and "user" in user_info and "points" in user_info["user"] else None
                 points_str = f"，当前总积分：{points}" if points is not None else ""
@@ -192,7 +201,7 @@ def execute_task(account_index, user_id, token, task_id, proxy=None, debug=False
                 return True
             else:
                 console.print(f"[bold yellow]{user_name}[/bold yellow] 完成{task_type} ID为 [bold cyan]{task_id}[/bold cyan] 返回状态码: {response.status_code} ⚠️")
-                return True
+                return False
         except Exception as e:
             if attempt < retry_attempts - 1:
                 console.print(f"[bold red]{user_name}[/bold red] 任务错误: {str(e)}, 尝试重试 ({attempt+1}/{retry_attempts}) 🔄")
@@ -202,37 +211,22 @@ def execute_task(account_index, user_id, token, task_id, proxy=None, debug=False
                 return False
 
 
-def run_tasks_for_account(account_index, user_id, token, proxy, task_list, completed_tasks, is_limited=False):
-    
+def run_tasks_for_account(account_index, user_id, token, proxy, task_list, regular_tasks, limited_tasks, is_limited=False):
+    # 获取用户信息
     user_info = get_user_info(user_id, token)
     user_name = user_info["user"]["name"] if user_info and "user" in user_info and "name" in user_info["user"] else f"账户{account_index+1}"
     
-    account_key = f"account_{user_name}"  
     task_type = "限时任务" if is_limited else "常规任务"
-    
-    if account_key not in completed_tasks:
-        completed_tasks[account_key] = {}
     
     config = load_config()
     task_interval = config.get("task_interval", 22)
     debug_mode = config.get("debug_mode", False)
     
     for task_id in task_list:
-        task_key = f"task_{task_id}"
+        # 执行任务
+        success = execute_task(account_index, user_id, token, task_id, regular_tasks, limited_tasks, proxy, debug_mode, user_name)
         
-        
-        if task_key in completed_tasks[account_key] and completed_tasks[account_key][task_key]:
-            console.print(f"[bold yellow]{user_name}[/bold yellow] 跳过已完成的{task_type} ID为 [bold cyan]{task_id}[/bold cyan] ⏭️")
-            continue
-        
-        
-        success = execute_task(account_index, user_id, token, task_id, proxy, debug_mode, user_name)
-        
-       
-        completed_tasks[account_key][task_key] = success
-        save_completed_tasks(completed_tasks)
-        
-       
+        # 如果不是最后一个任务，等待一段时间
         if task_id != task_list[-1]:
             time.sleep(task_interval)
 
@@ -242,13 +236,12 @@ def run_all_tasks(is_limited=False):
     user_ids = load_user_ids()
     proxies = load_proxies()
     config = load_config()
-    completed_tasks = load_completed_tasks()
     
     if not tokens or not user_ids:
         console.print("[bold red]错误: token.txt 或 id.txt 文件为空! ❌[/bold red]")
         return
     
-    
+    # 计算账户数量
     num_accounts = min(len(tokens), len(user_ids))
     
     if config.get("use_proxies", True) and len(proxies) < num_accounts:
@@ -256,8 +249,7 @@ def run_all_tasks(is_limited=False):
         if len(proxies) == 0:
             console.print("[yellow]将不使用代理继续...[/yellow]")
     
-    task_list = LIMITED_TASKS if is_limited else REGULAR_TASKS
-    task_type = "限时任务" if is_limited else "常规任务"
+    task_type = "限时任务" if is_limited else "普通任务"
     
     console.print(f"[bold green]开始执行{task_type}，共 {num_accounts} 个账户 🚀[/bold green]")
     
@@ -267,14 +259,25 @@ def run_all_tasks(is_limited=False):
         futures = []
         for i in range(num_accounts):
             proxy = proxies[i] if i < len(proxies) and config.get("use_proxies", True) else None
+            
+            # 获取该账户的可用任务
+            regular_tasks, limited_tasks = get_available_tasks(user_ids[i], tokens[i])
+            
+            # 根据类型选择任务列表
+            task_list = limited_tasks if is_limited else regular_tasks
+            
+            if not task_list:
+                console.print(f"[bold yellow]账户{i+1} 没有可用的{task_type} ⚠️[/bold yellow]")
+                continue
+                
             futures.append(
                 executor.submit(
                     run_tasks_for_account,
-                    i, user_ids[i], tokens[i], proxy, task_list, completed_tasks, is_limited
+                    i, user_ids[i], tokens[i], proxy, task_list, regular_tasks, limited_tasks, is_limited
                 )
             )
         
-        
+        # 等待所有任务完成
         for future in futures:
             future.result()
     
@@ -291,7 +294,7 @@ def run_checkin():
         console.print("[bold red]错误: token.txt 或 id.txt 文件为空! ❌[/bold red]")
         return
     
-    
+    # 计算账户数量
     num_accounts = min(len(tokens), len(user_ids))
     
     if config.get("use_proxies", True) and len(proxies) < num_accounts:
@@ -300,41 +303,58 @@ def run_checkin():
     for i in range(num_accounts):
         proxy = proxies[i] if i < len(proxies) and config.get("use_proxies", True) else None
         
-       
+        # 获取该账户的可用任务
+        regular_tasks, limited_tasks = get_available_tasks(user_ids[i], tokens[i])
+        
+        # 执行签到任务
         console.print(f"[bold blue]账户{i+1}[/bold blue] 正在完成签到 🔄")
-        success = execute_task(i, user_ids[i], tokens[i], CHECKIN_TASK, proxy)
+        success = execute_task(i, user_ids[i], tokens[i], CHECKIN_TASK, regular_tasks, limited_tasks, proxy)
         
         if success:
             next_checkin = datetime.datetime.now() + datetime.timedelta(days=1)
             next_checkin_str = next_checkin.strftime("%Y-%m-%d %H:%M:%S")
             console.print(f"[bold green]账户{i+1}[/bold green] 签到成功，下次签到时间为: [bold cyan]{next_checkin_str}[/bold cyan] ✅")
         
-        
+        # 如果不是最后一个账户，等待一段时间
         if i < num_accounts - 1:
             time.sleep(2)
     
     console.print("[bold green]所有账户签到完毕 ✅[/bold green]")
 
 
-def schedule_daily_checkin():
+def schedule_daily_checkin_and_tasks():
     schedule.clear()
-    schedule.every(24).hours.do(run_checkin)
     
-    console.print("[bold green]已设置每24小时自动签到 ⏰[/bold green]")
+    # 添加每24小时执行签到和检查任务
+    schedule.every(24).hours.do(run_daily_tasks)
     
+    console.print("[bold green]已设置每24小时自动签到并检查任务 ⏰[/bold green]")
     
+    # 创建守护线程执行定时任务
     checkin_thread = threading.Thread(target=run_scheduler)
     checkin_thread.daemon = True
     checkin_thread.start()
     
-    
+    # 立即执行一次
+    run_daily_tasks()
+
+
+def run_daily_tasks():
+    """执行每日任务：签到和检查新任务"""
+    console.print("[bold cyan]执行每日签到和任务检查...[/bold cyan]")
+    # 先执行签到
     run_checkin()
+    # 检查并执行限时任务
+    run_all_tasks(is_limited=True)
+    # 检查并执行普通任务
+    run_all_tasks(is_limited=False)
+    console.print("[bold green]每日任务执行完毕 ✅[/bold green]")
 
 
 def run_scheduler():
     while True:
         schedule.run_pending()
-        time.sleep(60)  
+        time.sleep(60)  # 每分钟检查一次是否有定时任务需要执行
 
 
 def display_status():
@@ -342,7 +362,6 @@ def display_status():
     user_ids = load_user_ids()
     proxies = load_proxies()
     config = load_config()
-    completed_tasks = load_completed_tasks()
     
     table = Table(title="SideQuest Bot 状态")
     
@@ -355,31 +374,37 @@ def display_status():
     table.add_row("并发数量", str(config.get("max_workers", 5)))
     table.add_row("任务间隔", f"{config.get('task_interval', 22)}秒")
     
-    
-    total_tasks = len(REGULAR_TASKS) + len(LIMITED_TASKS)
-    completed_count = 0
-    total_count = 0
-    
-    for account in completed_tasks:
-        for task_key, completed in completed_tasks[account].items():
-            total_count += 1
-            if completed:
-                completed_count += 1
-    
-    completion_rate = (completed_count / total_count * 100) if total_count > 0 else 0
-    table.add_row("任务完成率", f"{completion_rate:.2f}% ({completed_count}/{total_count})")
-    
-    console.print(table)
-
-
-def reset_completed_tasks():
-    confirmation = input("确认重置所有任务完成状态？这将导致所有任务重新执行。(y/n): ")
-    if confirmation.lower() == 'y':
-        with open(COMPLETED_TASKS_FILE, "w") as f:
-            json.dump({}, f, indent=4)
-        console.print("[bold green]已重置所有任务完成状态 ✅[/bold green]")
+    # 显示每个账户的任务状态和积分
+    if tokens and user_ids:
+        account_table = Table(title="账户信息")
+        account_table.add_column("账户", style="cyan")
+        account_table.add_column("积分", style="green")
+        account_table.add_column("可用普通任务", style="yellow")
+        account_table.add_column("可用限时任务", style="magenta")
+        
+        for i in range(min(len(tokens), len(user_ids))):
+            user_info = get_user_info(user_ids[i], tokens[i])
+            
+            if user_info and "user" in user_info:
+                user_name = user_info["user"].get("name", f"账户{i+1}")
+                points = user_info["user"].get("points", "未知")
+                
+                # 获取可用任务
+                regular_tasks, limited_tasks = get_available_tasks(user_ids[i], tokens[i])
+                
+                account_table.add_row(
+                    user_name, 
+                    str(points), 
+                    str(len(regular_tasks)), 
+                    str(len(limited_tasks))
+                )
+            else:
+                account_table.add_row(f"账户{i+1}", "获取失败", "未知", "未知")
+        
+        console.print(table)
+        console.print(account_table)
     else:
-        console.print("[yellow]已取消重置操作[/yellow]")
+        console.print(table)
 
 
 def show_menu():
@@ -387,45 +412,26 @@ def show_menu():
     
     while True:
         console.print("\n[bold cyan]==== SideQuest Bot 菜单 =====[/bold cyan]")
-        console.print("1. [green]执行限时任务和普通任务[/green]")
-        console.print("2. [green]启动24小时自动签到[/green]")
-        console.print("3. [yellow]查看状态信息[/yellow]")
-        console.print("4. [red]退出程序[/red]")
+        console.print("1. [green]24小时签到并检查任务情况[/green]")
+        console.print("2. [yellow]查看状态信息[/yellow]")
+        console.print("3. [red]退出程序[/red]")
         
-        choice = input("\n请选择操作 (1-4): ")
+        choice = input("\n请选择操作 (1-3): ")
         
         if choice == '1':
-            console.print("\n[bold]执行方式选择:[/bold]")
-            console.print("1. [green]仅执行限时任务[/green]")
-            console.print("2. [green]仅执行普通任务[/green]")
-            console.print("3. [green]执行全部任务[/green]")
-            
-            task_choice = input("\n请选择执行方式 (1-3): ")
-            
-            if task_choice == '1':
-                run_all_tasks(is_limited=True)
-            elif task_choice == '2':
-                run_all_tasks(is_limited=False)
-            elif task_choice == '3':
-                run_all_tasks(is_limited=True)
-                time.sleep(2)
-                run_all_tasks(is_limited=False)
-            else:
-                console.print("[bold red]无效的选择，请重试![/bold red]")
-                
-        elif choice == '2':
-            console.print("[bold green]启动24小时自动签到模式，程序将持续运行。按 Ctrl+C 可以停止程序。[/bold green]")
-            schedule_daily_checkin()
+            console.print("[bold green]启动24小时自动签到和任务检查模式，程序将持续运行。按 Ctrl+C 可以停止程序。[/bold green]")
+            schedule_daily_checkin_and_tasks()
             
             try:
                 while True:
                     time.sleep(1)
             except KeyboardInterrupt:
-                console.print("[bold red]\n自动签到已停止 ⛔[/bold red]")
-                return
-        elif choice == '3':
+                console.print("[bold red]\n自动签到和任务检查已停止 ⛔[/bold red]")
+                break
+                
+        elif choice == '2':
             display_status()
-        elif choice == '4':
+        elif choice == '3':
             console.print("[bold green]感谢使用 SideQuest Bot! 👋[/bold green]")
             break
         else:
@@ -434,14 +440,14 @@ def show_menu():
 
 if __name__ == "__main__":
     try:
-       
+        # 确保所需文件存在
         ensure_files_exist()
         
-        
+        # 加载配置
         config = load_config()
         console.print("[bold green]配置文件加载成功 ✅[/bold green]")
         
-       
+        # 显示菜单
         show_menu()
     except KeyboardInterrupt:
         console.print("[bold red]\n程序被用户中断 ⛔[/bold red]")
